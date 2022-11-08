@@ -2,13 +2,13 @@ use serialport::{
     Parity, DataBits, StopBits, FlowControl, SerialPort, ClearBuffer
 };
 
-const PORTNAME: &str = "/dev/ttyACM0";
+const PORTNAME: &str = "/dev/ttyACM0"; // Change to COM## if on windows
 const BAUDRATE: u32 = 115200;
 const PARITY: Parity = Parity::None;
 const DATABITS: DataBits = DataBits::Eight;
 const STOPBITS: StopBits = StopBits::One;
 const TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1000);
-const FLOWCONTROL: FlowControl = FlowControl::Hardware;
+const FLOWCONTROL: FlowControl = FlowControl::Hardware; // Newline + Carriage return
 
 
 pub fn open_string_potentiometer() -> Box<dyn SerialPort> {
@@ -21,13 +21,13 @@ pub fn open_string_potentiometer() -> Box<dyn SerialPort> {
                                                         .open().expect("Couldn't open port");
 
     std::thread::sleep(std::time::Duration::from_secs(2));
-    println!("running");
+
     serial_port.clear(ClearBuffer::All).expect("Couldn't clear buffer");
 
     return serial_port;
 }
 
-pub fn get_string_potentiometer_data(mut serial_port: Box<dyn SerialPort>) -> i32 {
+pub fn get_data(mut serial_port: Box<dyn SerialPort>) -> i32 {
     let write_buffer: &[u8] = b"\n";
     let mut read_buffer: [u8; 4] = [0; 4];
     
