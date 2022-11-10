@@ -1,0 +1,7 @@
+distance: 
+high speed: 
+low speed:
+acceleration time: 
+acceleration profile:
+idle time:
+dwell time: 
