@@ -577,7 +577,7 @@ pub fn calibrate_time(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<
     let file = &mut std::fs::File::options()
                                             .read(true)
                                             .append(true)
-                                            .open("./calibration_input.txt").unwrap();
+                                            .open("./input.txt").unwrap();
 
     let out_file = &mut std::fs::File::create("./out.txt").unwrap();
 
