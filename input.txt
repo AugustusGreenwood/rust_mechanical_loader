@@ -1,9 +1,3 @@
-Distance 500
-Cycles 1
-MaxSpeed 6000
-Factor 3
-Tolerance 0.99999
-Period 2
 HighSpeed 4050
 LowSpeed 1
 AccelerationTime 1000

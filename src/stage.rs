@@ -1,9 +1,20 @@
+use std::io::{Write, Read};
+
 use rusb::{
     DeviceHandle, devices, GlobalContext, DeviceDescriptor
 };
 
 pub const TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1000);
 
+
+pub struct Calibration {
+    distance: i32,
+    cycles: usize,
+    max_speed: usize,
+    factor: f64,
+    tolerance: f64,
+    period: f64
+}
 
 
 /* Interanl functions */
@@ -48,6 +59,56 @@ fn _saftey_read(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<()> {
     Ok(())
 }
 
+pub fn _get_set_params_from_file(handle: &mut DeviceHandle<GlobalContext>, file: &mut std::fs::File) -> rusb::Result<Calibration> {
+    let mut cali = Calibration { distance: 0i32, cycles: 0usize, max_speed: 0usize, factor: 0f64, tolerance: 0f64, period: 0f64 };
+    let mut whole_file_string = String::new();
+
+    file.read_to_string(&mut whole_file_string).unwrap();
+
+    let whole_file_split_by_line_vec: Vec<_> = whole_file_string.split("\n").collect();
+
+    for line in whole_file_split_by_line_vec {
+        let split_line: Vec<_> = line.split_whitespace().collect();
+
+        match split_line[0].to_ascii_lowercase().as_str() {
+            "distance" => cali.distance = split_line[1].parse().unwrap(),
+            "cycles" => cali.cycles = split_line[1].parse().unwrap(),
+            "maxspeed" => cali.max_speed = split_line[1].parse().unwrap(),
+            "factor" => cali.factor = split_line[1].parse().unwrap(),
+            "tolerance" => cali.tolerance = split_line[1].parse().unwrap(),
+            "period" => cali.period = split_line[1].parse().unwrap(),
+
+            "highspeed" => set_high_speed(handle, split_line[1].parse::<i32>().unwrap())?,
+            "lowspeed" => set_low_speed(handle, split_line[1].parse::<i32>().unwrap())?,
+            "accelerationtime" => set_acceleration_time(handle, split_line[1].parse::<i32>().unwrap())?,
+            "accelerationprofile" => set_acceleration_profile(handle, split_line[1])?,
+            "decelerationtime" => set_deceleration_time(handle, split_line[1].parse::<i32>().unwrap())?,
+            "idletime" => set_idle_time(handle, split_line[1].parse::<i32>().unwrap())?,
+            "final" => (),
+            _ => println!("Couldn't understand {}", split_line[0]),
+        };
+    }
+    write_driver_settings(handle)?;
+    turn_motor_on(handle)?;
+    Ok(cali)
+}
+
+pub fn _is_in_range_not_inclusive(low: f64, value: f64, high: f64) -> bool {
+    if low < value && value < high {
+        return true;
+    }
+    else {return false;}
+}
+
+pub fn vec_average(vec: Vec<f64>) -> f64 {
+    let mut sum: f64  = 0f64;
+
+    for ele in &vec {
+        sum = sum + ele;
+    }
+
+    sum / vec.len() as f64
+}
 
 /* Open (return handle to device) and close device, respectively */
 
@@ -423,6 +484,16 @@ pub fn set_microsteps(handle: &mut DeviceHandle<GlobalContext>, microsteps: i32)
     Ok(()) 
 }
 
+pub fn set_acceleration_profile(handle: &mut DeviceHandle<GlobalContext>, sin_trap: &str) -> rusb::Result<()> {
+    match sin_trap {
+        "sin"   =>  {send_command_get_response(handle, "SCV=1\0".as_bytes())?;},
+        "SIN"   =>  {send_command_get_response(handle, "SCV=1\0".as_bytes())?;},
+        "TRAP"  =>  {send_command_get_response(handle, "SCV=0\0".as_bytes())?;},
+        "trap"  =>  {send_command_get_response(handle, "SCV=0\0".as_bytes())?;},
+        _       =>  println!("Couldn't understand {}. Use sin, SIN, trap or TRAP", sin_trap),
+    };
+    Ok(())
+}
 
 /* 
     This all are usually involve movement of some kind of advancement settings or just do more than simply set/get 
@@ -467,3 +538,81 @@ pub fn move_one_cycle(handle: &mut DeviceHandle<GlobalContext>, distance: i32) -
     move_stage(handle, "INC", -distance)?;
     Ok(())
 }
+
+pub fn wait_for_motor_idle_position(handle: &mut DeviceHandle<GlobalContext>, file: &mut std::fs::File, time: std::time::SystemTime) -> rusb::Result<()> {
+    loop {
+        if get_motor_status(handle)? == 0 {
+            return Ok(())
+        }
+        file.write(&[time.elapsed().unwrap().as_secs_f64().to_string().as_bytes(),
+                        "\t".as_bytes(), 
+                        get_pulse_position(handle)?.to_string().as_bytes(),
+                        "\n".as_bytes()].concat()).unwrap();
+    }
+
+}
+
+pub fn move_one_cycle_position(handle: &mut DeviceHandle<GlobalContext>, distance: i32, file: &mut std::fs::File, time: std::time::SystemTime) -> rusb::Result<()> {
+    move_stage(handle, "INC", distance)?;
+    wait_for_motor_idle_position(handle, file, time)?;
+    move_stage(handle, "INC", -distance)?;
+    wait_for_motor_idle_position(handle, file, time)?;
+    Ok(())
+}
+
+pub fn get_average_time_over_cycles_position(handle: &mut DeviceHandle<GlobalContext>, distance: i32 ,cycles: usize, file: &mut std::fs::File) -> rusb::Result<f64> {
+    let mut times: Vec<f64> = vec![0f64; cycles];
+    
+    let big_time = std::time::SystemTime::now();
+    for i in 0..cycles {
+        let time = std::time::SystemTime::now();
+        move_one_cycle_position(handle, distance, file, big_time)?;
+        times[i] = time.elapsed().unwrap().as_secs_f64();
+    }
+
+    Ok(vec_average(times))
+}
+
+pub fn calibrate_time(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<()> {
+    let file = &mut std::fs::File::options()
+                                            .read(true)
+                                            .append(true)
+                                            .open("./calibration_input.txt").unwrap();
+
+    let out_file = &mut std::fs::File::create("./out.txt").unwrap();
+
+    let cali: Calibration = _get_set_params_from_file(handle, file)?;
+
+    let min_period: f64 = cali.period * cali.tolerance;
+    let max_period: f64 = cali.period * (2f64 - cali.tolerance);
+
+    let mut hspd: f64 = get_high_speed(handle)? as f64;
+    
+    set_pulse_position(handle, 0)?;
+    loop {
+        let time = get_average_time_over_cycles_position(handle, cali.distance, cali.cycles, out_file)?;
+
+        if _is_in_range_not_inclusive(min_period, time, max_period) {
+            break;
+        }
+        
+        let error: f64 = time - cali.period;
+        hspd += error * cali.factor * 1000f64;
+        println!("t: {} s: {}", time, hspd);
+
+        if _is_in_range_not_inclusive(100f64, hspd, cali.max_speed as f64) {
+            set_high_speed(handle, hspd as i32)?;
+        }
+        else {
+            println!("Max/min high speed tripped! Value was {}", hspd);
+            return Err(rusb::Error::Overflow);
+        }
+    }
+
+    file.write(&["\nFinal high speed: ".as_bytes(), hspd.to_string().as_bytes()].concat()).unwrap();
+    set_high_speed(handle, hspd as i32)?;
+
+    Ok(())
+}
+
+
