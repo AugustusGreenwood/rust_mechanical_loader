@@ -560,10 +560,10 @@ pub fn move_one_cycle_position(handle: &mut DeviceHandle<GlobalContext>, distanc
     Ok(())
 }
 
-pub fn get_average_time_over_cycles_position(handle: &mut DeviceHandle<GlobalContext>, distance: i32 ,cycles: usize, file: &mut std::fs::File) -> rusb::Result<f64> {
+pub fn get_average_time_over_cycles_position(handle: &mut DeviceHandle<GlobalContext>, distance: i32 ,cycles: usize, file: &mut std::fs::File, big_time: std::time::SystemTime) -> rusb::Result<f64> {
     let mut times: Vec<f64> = vec![0f64; cycles];
     
-    let big_time = std::time::SystemTime::now();
+    //let big_time = std::time::SystemTime::now();
     for i in 0..cycles {
         let time = std::time::SystemTime::now();
         move_one_cycle_position(handle, distance, file, big_time)?;
@@ -578,8 +578,7 @@ pub fn calibrate_time(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<
                                             .read(true)
                                             .append(true)
                                             .open("./input.txt").unwrap();
-
-    let out_file = &mut std::fs::File::create("./out.txt").unwrap();
+    let out_file = &mut std::fs::File::create("./.cali_trash.txt").unwrap();
 
     let cali: Calibration = _get_set_params_from_file(handle, file)?;
 
@@ -589,28 +588,68 @@ pub fn calibrate_time(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<
     let mut hspd: f64 = get_high_speed(handle)? as f64;
     
     set_pulse_position(handle, 0)?;
-    loop {
-        let time = get_average_time_over_cycles_position(handle, cali.distance, cali.cycles, out_file)?;
 
-        if _is_in_range_not_inclusive(min_period, time, max_period) {
+    loop {
+        let time: f64 = get_average_time_over_cycles_position(handle, cali.distance, cali.cycles, out_file, std::time::SystemTime::now())?;
+
+        if _is_in_range_not_inclusive(min_period, 0.0, max_period) {
             break;
         }
-        
+
         let error: f64 = time - cali.period;
+
         hspd += error * cali.factor * 1000f64;
+
         println!("t: {} s: {}", time, hspd);
 
         if _is_in_range_not_inclusive(100f64, hspd, cali.max_speed as f64) {
             set_high_speed(handle, hspd as i32)?;
         }
         else {
-            println!("Max/min high speed tripped! Value was {}", hspd);
+            println!("Max/min high speed tripped! Value was {}, error was {}", hspd, error);
             return Err(rusb::Error::Overflow);
         }
     }
 
     file.write(&["\nFinal high speed: ".as_bytes(), hspd.to_string().as_bytes()].concat()).unwrap();
     set_high_speed(handle, hspd as i32)?;
+
+    Ok(())
+}
+
+
+pub fn run(handle: &mut DeviceHandle<GlobalContext>, dura: f64) -> rusb::Result<()> {
+    let file = &mut std::fs::File::options()
+                                            .read(true)
+                                            .append(true)
+                                            .open("./input.txt").unwrap();
+
+    let out_file = &mut std::fs::File::create("./out.txt").unwrap();
+
+    let cali: Calibration = _get_set_params_from_file(handle, file)?;
+
+    let mut hspd: f64 = get_high_speed(handle)? as f64;
+    
+    set_pulse_position(handle, 0)?;
+
+    let mut i: i32 = 1;
+    let t = std::time::SystemTime::now();
+    loop {
+        move_one_cycle_position(handle, cali.distance, out_file, t)?;
+        let elap = t.elapsed().unwrap().as_secs_f64();
+
+        println!("{} {}", elap, cali.period * i as f64);
+        let error: f64 = elap - cali.period * i as f64;
+        i += 1;
+
+        hspd += error * cali.factor * 1000f64;
+
+        if elap >= dura {
+            break;
+        }
+
+        set_high_speed(handle, hspd as i32)?;
+    }
 
     Ok(())
 }
