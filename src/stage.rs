@@ -68,6 +68,10 @@ pub fn _get_set_params_from_file(handle: &mut DeviceHandle<GlobalContext>, file:
     let whole_file_split_by_line_vec: Vec<_> = whole_file_string.split("\n").collect();
 
     for line in whole_file_split_by_line_vec {
+        if line.len() == 0 {
+            continue;
+        }
+
         let split_line: Vec<_> = line.split_whitespace().collect();
 
         match split_line[0].to_ascii_lowercase().as_str() {
@@ -540,16 +544,19 @@ pub fn move_one_cycle(handle: &mut DeviceHandle<GlobalContext>, distance: i32) -
 }
 
 pub fn wait_for_motor_idle_position(handle: &mut DeviceHandle<GlobalContext>, file: &mut std::fs::File, time: std::time::SystemTime) -> rusb::Result<()> {
+    let mut i = 0;
     loop {
         if get_motor_status(handle)? == 0 {
             return Ok(())
         }
-        file.write(&[time.elapsed().unwrap().as_secs_f64().to_string().as_bytes(),
-                        "\t".as_bytes(), 
-                        get_pulse_position(handle)?.to_string().as_bytes(),
-                        "\n".as_bytes()].concat()).unwrap();
+        if i % 4 == 0 {
+            file.write(&[time.elapsed().unwrap().as_secs_f64().to_string().as_bytes(),
+                            "\t".as_bytes(), 
+                            get_pulse_position(handle)?.to_string().as_bytes(),
+                            "\n".as_bytes()].concat()).unwrap();
+        }
+        i += 1;
     }
-
 }
 
 pub fn move_one_cycle_position(handle: &mut DeviceHandle<GlobalContext>, distance: i32, file: &mut std::fs::File, time: std::time::SystemTime) -> rusb::Result<()> {
@@ -577,7 +584,8 @@ pub fn calibrate_time(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<
     let file = &mut std::fs::File::options()
                                             .read(true)
                                             .append(true)
-                                            .open("./input.txt").unwrap();
+                                            .open("./input.txt")
+                                            .expect("Couldn't find input file in directory");
     let out_file = &mut std::fs::File::create("./.cali_trash.txt").unwrap();
 
     let cali: Calibration = _get_set_params_from_file(handle, file)?;
@@ -585,24 +593,26 @@ pub fn calibrate_time(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<
     let min_period: f64 = cali.period * cali.tolerance;
     let max_period: f64 = cali.period * (2f64 - cali.tolerance);
 
-    let mut hspd: f64 = get_high_speed(handle)? as f64;
+    let mut hspd: i32 = get_high_speed(handle)?;
     
     set_pulse_position(handle, 0)?;
 
     loop {
         let time: f64 = get_average_time_over_cycles_position(handle, cali.distance, cali.cycles, out_file, std::time::SystemTime::now())?;
 
-        if _is_in_range_not_inclusive(min_period, 0.0, max_period) {
+        if _is_in_range_not_inclusive(min_period, time, max_period) {
+            file.write(&["\nFinal high speed: ".as_bytes(), hspd.to_string().as_bytes()].concat()).unwrap();
+            file.write(&["\nFinal time: ".as_bytes(), time.to_string().as_bytes()].concat()).unwrap();
             break;
         }
 
         let error: f64 = time - cali.period;
 
-        hspd += error * cali.factor * 1000f64;
+        hspd += (error * cali.factor * 1000.0) as i32;
 
         println!("t: {} s: {}", time, hspd);
 
-        if _is_in_range_not_inclusive(100f64, hspd, cali.max_speed as f64) {
+        if _is_in_range_not_inclusive(100f64, hspd as f64, cali.max_speed as f64) {
             set_high_speed(handle, hspd as i32)?;
         }
         else {
@@ -610,25 +620,24 @@ pub fn calibrate_time(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<
             return Err(rusb::Error::Overflow);
         }
     }
-
-    file.write(&["\nFinal high speed: ".as_bytes(), hspd.to_string().as_bytes()].concat()).unwrap();
     set_high_speed(handle, hspd as i32)?;
-
     Ok(())
 }
 
 
-pub fn run(handle: &mut DeviceHandle<GlobalContext>, dura: f64) -> rusb::Result<()> {
+pub fn sin_run(handle: &mut DeviceHandle<GlobalContext>, dura: f64) -> rusb::Result<()> {
     let file = &mut std::fs::File::options()
                                             .read(true)
                                             .append(true)
-                                            .open("./input.txt").unwrap();
+                                            .open("./input.txt")
+                                            .expect("Couldn't find input file in directory");
 
     let out_file = &mut std::fs::File::create("./out.txt").unwrap();
 
     let cali: Calibration = _get_set_params_from_file(handle, file)?;
 
-    let mut hspd: f64 = get_high_speed(handle)? as f64;
+    let mut hspd: i32 = get_high_speed(handle)?;
+    let start_hspd: f64 = get_high_speed(handle)? as f64;
     
     set_pulse_position(handle, 0)?;
 
@@ -636,22 +645,42 @@ pub fn run(handle: &mut DeviceHandle<GlobalContext>, dura: f64) -> rusb::Result<
     let t = std::time::SystemTime::now();
     loop {
         move_one_cycle_position(handle, cali.distance, out_file, t)?;
-        let elap = t.elapsed().unwrap().as_secs_f64();
 
-        println!("{} {}", elap, cali.period * i as f64);
-        let error: f64 = elap - cali.period * i as f64;
-        i += 1;
+        let error: f64 = t.elapsed().unwrap().as_secs_f64() - (cali.period * i as f64);
 
-        hspd += error * cali.factor * 1000f64;
+        hspd = start_hspd as i32 + (error * cali.factor * 1000f64) as i32;
+        
+        println!("{} {}", error, hspd);
 
-        if elap >= dura {
-            break;
+        if _is_in_range_not_inclusive(100.0, hspd as f64, cali.max_speed as f64) == false {
+            panic!("Max/Min speed tripped at value {}", hspd);
         }
 
+        if cali.period * i as f64 >= dura {
+            break;
+        }
+        
         set_high_speed(handle, hspd as i32)?;
+        i += 1;
     }
 
     Ok(())
 }
+
+pub fn camel_run(handle: &mut DeviceHandle<GlobalContext>, dura: f64) -> rusb::Result<()> {
+    let cali = _get_set_params_from_file(handle, &mut std::fs::File::open("./input.txt").unwrap())?;
+    set_pulse_position(handle, 0)?;
+    let file = &mut std::fs::File::create("./camel.txt").unwrap();
+    let mut i = 1;
+    let time = std::time::SystemTime::now();
+    while time.elapsed().unwrap().as_secs_f64() < dura {
+        if time.elapsed().unwrap().as_secs_f64() >= cali.period * i as f64 {
+            move_one_cycle_position(handle, cali.distance, file, time)?;
+            i += 1;
+        }
+    }
+    Ok(())
+}
+
 
 

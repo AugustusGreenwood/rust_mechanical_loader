@@ -1,10 +1,10 @@
 Distance 500
 Cycles 3
-MaxSpeed 10000
-Factor 1.5
-Tolerance 0.99
+MaxSpeed 20000
+Factor 1
+Tolerance 0.9999
 Period 2
-HighSpeed 2120
+HighSpeed 2114
 LowSpeed 1
 AccelerationTime 1000
 AccelerationProfile trap
