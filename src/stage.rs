@@ -24,7 +24,7 @@ fn _write_to_control(handle: &mut DeviceHandle<GlobalContext>, value: u16) -> ru
     match handle.write_control(64, 2, value, 0, &[], TIMEOUT) {
         Ok(_n) => (),
         Err(e) => {
-            println!("%%%% Couldn't write to control buffer.\n%%%% Non-critical error: \"{}\"", e);
+            println!("Couldn't write to control buffer. Non-critical error {}", e);
             return Err(e);
         },
     };
