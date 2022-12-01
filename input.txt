@@ -10,3 +10,4 @@ AccelerationTime 1000
 AccelerationProfile trap
 DecelerationTime 1000
 IdleTime 1
+DwellTime 1000

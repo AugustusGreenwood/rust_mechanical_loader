@@ -6,14 +6,15 @@ use rusb::{
 
 pub const TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1000);
 
-
 pub struct Calibration {
     distance: i32,
     cycles: usize,
     max_speed: usize,
     factor: f64,
     tolerance: f64,
-    period: f64
+    period: f64,
+    dwell_time: f64,
+    duration: f64
 }
 
 
@@ -30,9 +31,9 @@ fn _write_to_control(handle: &mut DeviceHandle<GlobalContext>, value: u16) -> ru
     Ok(())
 }
 
-fn _check_for_valid_response(response: &String, error_log: &str) -> rusb::Result<()> {
+fn _check_for_valid_response(response: &String) -> rusb::Result<()> {
     if response.starts_with('?') {
-        println!("Response {} is invalid.\n{}", response, error_log);
+        println!("Response {} is invalid.", response);
         return Err(rusb::Error::Io);
     }
     Ok(())
@@ -60,7 +61,15 @@ fn _saftey_read(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<()> {
 }
 
 pub fn _get_set_params_from_file(handle: &mut DeviceHandle<GlobalContext>, file: &mut std::fs::File) -> rusb::Result<Calibration> {
-    let mut cali = Calibration { distance: 0i32, cycles: 0usize, max_speed: 0usize, factor: 0f64, tolerance: 0f64, period: 0f64 };
+    let mut cali = Calibration {distance: 0i32,
+                                            cycles: 0usize, 
+                                            max_speed: 0usize, 
+                                            factor: 0f64, 
+                                            tolerance: 0f64, 
+                                            period: 0f64,
+                                            dwell_time: 0f64,
+                                            duration: 0f64};
+                                            
     let mut whole_file_string = String::new();
 
     file.read_to_string(&mut whole_file_string).unwrap();
@@ -81,6 +90,8 @@ pub fn _get_set_params_from_file(handle: &mut DeviceHandle<GlobalContext>, file:
             "factor" => cali.factor = split_line[1].parse().unwrap(),
             "tolerance" => cali.tolerance = split_line[1].parse().unwrap(),
             "period" => cali.period = split_line[1].parse().unwrap(),
+            "dwelltime" => cali.dwell_time = split_line[1].parse().unwrap(),
+            "duration" => cali.duration = split_line[1].parse().unwrap(),
 
             "highspeed" => set_high_speed(handle, split_line[1].parse::<i32>().unwrap())?,
             "lowspeed" => set_low_speed(handle, split_line[1].parse::<i32>().unwrap())?,
@@ -97,7 +108,7 @@ pub fn _get_set_params_from_file(handle: &mut DeviceHandle<GlobalContext>, file:
     Ok(cali)
 }
 
-pub fn _is_in_range_not_inclusive(low: f64, value: f64, high: f64) -> bool {
+pub fn is_in_range_not_inclusive(low: f64, value: f64, high: f64) -> bool {
     if low < value && value < high {
         return true;
     }
@@ -193,11 +204,12 @@ pub fn read_from_bulk(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<
     let output: &mut Vec<u8> = &mut [0u8; 64].to_vec();
     let response: String = match handle.read_bulk(0x82, output, TIMEOUT) {
         Ok(_n) => _extract_response_from_raw_output(output),
+        
         Err(e) => {
             println!("Couldn't bulk read with error: {:#?}", e);
             return Err(e);
         },
-    };  
+    };
     Ok(response)
 }
 
@@ -206,8 +218,21 @@ pub fn send_command_get_response(handle: &mut DeviceHandle<GlobalContext>, comma
     
     write_to_bulk(handle, command)?;
 
-    let response: String = read_from_bulk(handle)?;
+    let response: String = match read_from_bulk(handle) {
+        Ok(r) => match _check_for_valid_response(&r) {
+            Ok(()) => r,
+            
+            Err(e) => {
+                println!("Couldn't understand command {:#?} with response {:#?}", command, r);
+                return Err(e)
+            },
+        },
 
+        Err(e) => {
+            println!("Bulk read failed with error {}", e);
+            return Err(e);
+        },
+    };
     Ok(response)
 }
 
@@ -220,20 +245,18 @@ pub fn send_command_get_response(handle: &mut DeviceHandle<GlobalContext>, comma
 */
 
 pub fn turn_motor_on(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<()> {
-    let error_log: &str = "Couldn't turn motor on";
     match send_command_get_response(handle, "EO=1\0".as_bytes()) {
-        Ok(response) => _check_for_valid_response(&response, error_log)?,
+        Ok(_response) => (),
         
-        Err(_e) => panic!("Couldn't turn motor on, exiting to avoid mechanical errors"),
+        Err(e) => panic!("Couldn't turn motor on with error {}, exiting to avoid mechanical errors", e),
     };
     std::thread::sleep(std::time::Duration::from_secs(3));
     Ok(())
 }
 
 pub fn turn_motor_off(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<()> {
-    let error_log: &str = "Couldn't turn motor off";
     match send_command_get_response(handle, "EO=0\0".as_bytes()) {
-        Ok(response) => _check_for_valid_response(&response, error_log)?,
+        Ok(_response) => (),
         
         Err(e) => panic!("Couldn't turn motor off due to error {}, exiting to avoid mechanical errors", e),
     };
@@ -242,30 +265,28 @@ pub fn turn_motor_off(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<
 }
 
 pub fn write_driver_settings(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<()> {
-    let error_log: &str = "Couldn't write driver settings";
     match send_command_get_response(handle, "RW\0".as_bytes()) {
-        Ok(response) => _check_for_valid_response(&response, error_log)?,
+        Ok(_response) => (),
         
         Err(e) => {
-            println!("{}", error_log);
+            println!("Couldn't write driver settings");
             return Err(e);
-        }
+        },
     };
-    std::thread::sleep(std::time::Duration::from_millis(2500));
+    std::thread::sleep(std::time::Duration::from_secs(3));
     Ok(())
 }
 
 pub fn update_readable_driver_settings(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<()> {
-    let error_log: &str = "Couldn't read driver settings";
     match send_command_get_response(handle, "RR\0".as_bytes()) {
-        Ok(response) => _check_for_valid_response(&response, error_log)?,
+        Ok(_response) => (),
         
         Err(e) => {
-            println!("{}", error_log);
+            println!("Couldn't update driver settings with error {}", e);
             return Err(e);
         }
     };
-    std::thread::sleep(std::time::Duration::from_millis(2500));
+    std::thread::sleep(std::time::Duration::from_secs(3));
     Ok(())
 }
 
@@ -337,6 +358,18 @@ pub fn get_pulse_position(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Res
     Ok(response)
 }
 
+pub fn get_encoder_position(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<i32> {
+    let response: i32 = match send_command_get_response(handle, "EX\0".as_bytes()) {
+        Ok(response) => response.parse::<i32>().unwrap(),
+        
+        Err(e) => {
+            println!("Couldn't get encoder position");
+            return Err(e);
+        }
+    };
+    Ok(response)
+}
+
 pub fn acceleration_profile_is_sin(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<i32> {
     let response: i32 = match send_command_get_response(handle, "SCV\0".as_bytes()) {
         Ok(response) => response.parse().unwrap(),
@@ -383,89 +416,108 @@ pub fn get_motor_status(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Resul
 */
 
 pub fn set_high_speed(handle: &mut DeviceHandle<GlobalContext>, new_high_speed: i32) -> rusb::Result<()> {
-    let error_log: &str = "Couldn't set high speed";
     match send_command_get_response(handle, &["HSPD=".as_bytes(), &new_high_speed.to_string().as_bytes(), "\0".as_bytes()].concat()) {
-        Ok(response) => _check_for_valid_response(&response, error_log)?,
+        Ok(_response) => (),
         
         Err(e) => {
-            println!("{}", error_log);
+            println!("Couldn't set high speed with error {}", e);
             return Err(e);
-        }
+        },
     };
     Ok(())
 }
 
 pub fn set_low_speed(handle: &mut DeviceHandle<GlobalContext>, new_low_speed: i32) -> rusb::Result<()> {
-    let error_log: &str = "Couldn't set low speed";
     match send_command_get_response(handle, &["LSPD=".as_bytes(), &new_low_speed.to_string().as_bytes(), "\0".as_bytes()].concat()) {
-        Ok(response) => _check_for_valid_response(&response, error_log)?,
+        Ok(_response) => (),
         
         Err(e) => {
-            println!("{}", error_log);
+            println!("Couldn't low high speed with error {}", e);
             return Err(e);
-        }
+        },
     };
     Ok(())
 }
 
 pub fn set_acceleration_time(handle: &mut DeviceHandle<GlobalContext>, new_acceleration_time: i32) -> rusb::Result<()> {
-    let error_log: &str = "Couldn't set acceleration time";
     match send_command_get_response(handle, &["ACC=".as_bytes(), &new_acceleration_time.to_string().as_bytes(), "\0".as_bytes()].concat()) {
-        Ok(response) => _check_for_valid_response(&response, error_log)?,
+        Ok(_response) => (),
+        
         Err(e) => {
-            println!("{}", error_log);
+            println!("Couldn't set acceleration time with error {}", e);
             return Err(e);
-        }
+        },
     };
     Ok(())
 }
 
 pub fn set_deceleration_time(handle: &mut DeviceHandle<GlobalContext>, new_deceleration_time: i32) -> rusb::Result<()> {
-    let error_log: &str = "Couldn't set deceleration time";
     match send_command_get_response(handle, &["DEC=".as_bytes(), &new_deceleration_time.to_string().as_bytes(), "\0".as_bytes()].concat()) {
-        Ok(response) => _check_for_valid_response(&response, error_log)?,
+        Ok(_response) => (),
         
         Err(e) => {
-            println!("{}", error_log);
+            println!("Couldn't set deceleration time with error {}", e);
             return Err(e);
-        }
+        },
     };
     Ok(())
 }
 
 pub fn set_pulse_position(handle: &mut DeviceHandle<GlobalContext>, pulse_position: i32) -> rusb::Result<()> {
-    let error_log: &str = "Couldn't set pulse position";
     match send_command_get_response(handle, &["PX=".as_bytes(), &pulse_position.to_string().as_bytes(), "\0".as_bytes()].concat()) {
-        Ok(response) => _check_for_valid_response(&response, error_log)?,
+        Ok(_response) => (),
         
         Err(e) => {
-            println!("{}", error_log);
+            println!("Couldn't set pulse position with error {}", e);
             return Err(e);
-        }
+        },
     };
     Ok(())
 }
 
 pub fn set_idle_time(handle: &mut DeviceHandle<GlobalContext>, idle_time: i32) -> rusb::Result<()> {
-    let error_log: &str = "Couldn't set idle time";
     match send_command_get_response(handle, &["DRVIT=".as_bytes(), &idle_time.to_string().as_bytes(), "\0".as_bytes()].concat()) {
-        Ok(response) => _check_for_valid_response(&response, error_log)?,
+        Ok(_response) => (),
 
         Err(e) => {
-            println!("{}", error_log);
+            println!("Couldn't set idle time with error {}", e);
             return Err(e);
-        }
+        },
+    };
+    Ok(())
+}
+
+fn _set_movement_to_inc(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<()> {
+    match send_command_get_response(handle, &["INC".as_bytes(), "\0".as_bytes()].concat()) {
+        Ok(_response) => (),
+
+        Err(e) => {
+            println!("Couldn't set movement to incremental with error {}", e);
+            return Err(e);
+        },
+    };
+    Ok(())
+}
+
+fn _set_movement_to_abs(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<()> {
+    match send_command_get_response(handle, &["ABS".as_bytes(), "\0".as_bytes()].concat()) {
+        Ok(_response) => (),
+
+        Err(e) => {
+            println!("Couldn't set movement to absolute with error {}", e);
+            return Err(e);
+        },
     };
     Ok(())
 }
 
 pub fn set_movement_type(handle: &mut DeviceHandle<GlobalContext>, abs_inc: &str) -> rusb::Result<()> {
     match abs_inc {
-        "abs" => send_command_get_response(handle, "ABS\0".as_bytes())?,
-        "ABS" => send_command_get_response(handle, "ABS\0".as_bytes())?,
+        "abs" => _set_movement_to_abs(handle)?,
+        "ABS" => _set_movement_to_abs(handle)?,
 
-        "inc" => send_command_get_response(handle, "INC\0".as_bytes())?,
-        "INC" => send_command_get_response(handle, "INC\0".as_bytes())?,
+        "inc" => _set_movement_to_inc(handle)?,
+        "INC" => _set_movement_to_inc(handle)?,
 
         _ => {
             println!("Couldn't understand absolute or increment command. Use 'INC', 'ABS', 'inc' or 'abs'");
@@ -476,24 +528,47 @@ pub fn set_movement_type(handle: &mut DeviceHandle<GlobalContext>, abs_inc: &str
 }
 
 pub fn set_microsteps(handle: &mut DeviceHandle<GlobalContext>, microsteps: i32) -> rusb::Result<()> {
-    let error_log: &str = "Couldn't set microsteps";
     match send_command_get_response(handle, &["DRVMS=".as_bytes(), &microsteps.to_string().as_bytes(), "\0".as_bytes()].concat()) {
-        Ok(response) => _check_for_valid_response(&response, error_log)?,
+        Ok(_response) => (),
 
         Err(e) => {
-            println!("{}", error_log);
+            println!("Couldn't set microsteps with error {}", e);
             return Err(e);
-        }
+        },
     };
     Ok(()) 
 }
 
+fn _set_profile_to_sin(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<()> {
+    match send_command_get_response(handle, &["SCV=1".as_bytes(), "\0".as_bytes()].concat()) {
+        Ok(_response) => (),
+
+        Err(e) => {
+            println!("Couldn't set profile to sin with error {}", e);
+            return Err(e);
+        },
+    };
+    Ok(())
+}
+
+fn _set_profile_to_trap(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<()> {
+    match send_command_get_response(handle, &["SCV=0".as_bytes(), "\0".as_bytes()].concat()) {
+        Ok(_response) => (),
+
+        Err(e) => {
+            println!("Couldn't set profile to trap with error {}", e);
+            return Err(e);
+        },
+    };
+    Ok(())
+}
+
 pub fn set_acceleration_profile(handle: &mut DeviceHandle<GlobalContext>, sin_trap: &str) -> rusb::Result<()> {
     match sin_trap {
-        "sin"   =>  {send_command_get_response(handle, "SCV=1\0".as_bytes())?;},
-        "SIN"   =>  {send_command_get_response(handle, "SCV=1\0".as_bytes())?;},
-        "TRAP"  =>  {send_command_get_response(handle, "SCV=0\0".as_bytes())?;},
-        "trap"  =>  {send_command_get_response(handle, "SCV=0\0".as_bytes())?;},
+        "sin"   =>  _set_profile_to_sin(handle)?,
+        "SIN"   =>  _set_profile_to_sin(handle)?,
+        "TRAP"  =>  _set_profile_to_trap(handle)?,
+        "trap"  =>  _set_profile_to_trap(handle)?,
         _       =>  println!("Couldn't understand {}. Use sin, SIN, trap or TRAP", sin_trap),
     };
     Ok(())
@@ -502,8 +577,7 @@ pub fn set_acceleration_profile(handle: &mut DeviceHandle<GlobalContext>, sin_tr
 /* 
     This all are usually involve movement of some kind of advancement settings or just do more than simply set/get 
 */
-pub fn move_stage(handle: &mut DeviceHandle<GlobalContext>, abs_inc: &str, distance: i32) -> rusb::Result<()> {
-    set_movement_type(handle, abs_inc)?;
+pub fn move_stage(handle: &mut DeviceHandle<GlobalContext>, distance: i32) -> rusb::Result<()> {
     send_command_get_response(handle, &["X".as_bytes(), &distance.to_string().as_bytes(), "\0".as_bytes()].concat())?;
     Ok(())
 }
@@ -518,13 +592,12 @@ pub fn interactive_mode(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Resul
         
         let command = raw_command.trim().to_ascii_uppercase();
 
-        if command == "EXIT" || command == "E" {
-            break;
-        }
+        if command == "EXIT" || command == "E" {break;}
 
         let response = send_command_get_response(handle, &[command.as_bytes(), "\0".as_bytes()].concat())?;
         println!("{}", response);
     }
+    println!("Exiting interactive mode");
     Ok(())
 }
 
@@ -537,43 +610,45 @@ pub fn wait_for_motor_idle(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Re
 }
 
 pub fn move_one_cycle(handle: &mut DeviceHandle<GlobalContext>, distance: i32) -> rusb::Result<()> {
-    move_stage(handle, "INC", distance)?;
+    move_stage(handle, distance)?;
     wait_for_motor_idle(handle)?;
-    move_stage(handle, "INC", -distance)?;
+    move_stage(handle, -distance)?;
     Ok(())
 }
 
-pub fn wait_for_motor_idle_position(handle: &mut DeviceHandle<GlobalContext>, file: &mut std::fs::File, time: std::time::SystemTime) -> rusb::Result<()> {
+pub fn wait_for_motor_idle_position(handle: &mut DeviceHandle<GlobalContext>, file: &mut std::fs::File, time: std::time::SystemTime, dwell_time: f64) -> rusb::Result<()> {
     let mut i = 0;
+    std::thread::sleep(std::time::Duration::from_secs_f64(dwell_time));
     loop {
         if get_motor_status(handle)? == 0 {
             return Ok(())
         }
+
         if i % 4 == 0 {
             file.write(&[time.elapsed().unwrap().as_secs_f64().to_string().as_bytes(),
                             "\t".as_bytes(), 
-                            get_pulse_position(handle)?.to_string().as_bytes(),
+                            get_encoder_position(handle)?.to_string().as_bytes(),
                             "\n".as_bytes()].concat()).unwrap();
         }
         i += 1;
     }
 }
 
-pub fn move_one_cycle_position(handle: &mut DeviceHandle<GlobalContext>, distance: i32, file: &mut std::fs::File, time: std::time::SystemTime) -> rusb::Result<()> {
-    move_stage(handle, "INC", distance)?;
-    wait_for_motor_idle_position(handle, file, time)?;
-    move_stage(handle, "INC", -distance)?;
-    wait_for_motor_idle_position(handle, file, time)?;
+pub fn move_one_cycle_position(handle: &mut DeviceHandle<GlobalContext>, distance: i32, file: &mut std::fs::File, time: std::time::SystemTime, dwell_time: f64) -> rusb::Result<()> {
+    move_stage(handle, distance)?;
+    wait_for_motor_idle_position(handle, file, time, dwell_time)?;
+    move_stage(handle, -distance)?;
+    wait_for_motor_idle_position(handle, file, time, dwell_time)?;
     Ok(())
 }
 
-pub fn get_average_time_over_cycles_position(handle: &mut DeviceHandle<GlobalContext>, distance: i32 ,cycles: usize, file: &mut std::fs::File, big_time: std::time::SystemTime) -> rusb::Result<f64> {
+pub fn get_average_time_over_cycles_position(handle: &mut DeviceHandle<GlobalContext>, distance: i32 ,cycles: usize, file: &mut std::fs::File, big_time: std::time::SystemTime, dwell_time: f64) -> rusb::Result<f64> {
     let mut times: Vec<f64> = vec![0f64; cycles];
     
     //let big_time = std::time::SystemTime::now();
     for i in 0..cycles {
         let time = std::time::SystemTime::now();
-        move_one_cycle_position(handle, distance, file, big_time)?;
+        move_one_cycle_position(handle, distance, file, big_time, dwell_time)?;
         times[i] = time.elapsed().unwrap().as_secs_f64();
     }
 
@@ -582,10 +657,10 @@ pub fn get_average_time_over_cycles_position(handle: &mut DeviceHandle<GlobalCon
 
 pub fn calibrate_time(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<()> {
     let file = &mut std::fs::File::options()
-                                            .read(true)
-                                            .append(true)
-                                            .open("./input.txt")
-                                            .expect("Couldn't find input file in directory");
+                                    .read(true)
+                                    .append(true)
+                                    .open("./input.txt")
+                                    .expect("Couldn't find input file in directory");
     let out_file = &mut std::fs::File::create("./.cali_trash.txt").unwrap();
 
     let cali: Calibration = _get_set_params_from_file(handle, file)?;
@@ -596,11 +671,12 @@ pub fn calibrate_time(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<
     let mut hspd: i32 = get_high_speed(handle)?;
     
     set_pulse_position(handle, 0)?;
+    set_movement_type(handle, "INC")?;
 
     loop {
-        let time: f64 = get_average_time_over_cycles_position(handle, cali.distance, cali.cycles, out_file, std::time::SystemTime::now())?;
+        let time: f64 = get_average_time_over_cycles_position(handle, cali.distance, cali.cycles, out_file, std::time::SystemTime::now(), cali.dwell_time)?;
 
-        if _is_in_range_not_inclusive(min_period, time, max_period) {
+        if is_in_range_not_inclusive(min_period, time, max_period) {
             file.write(&["\nFinal high speed: ".as_bytes(), hspd.to_string().as_bytes()].concat()).unwrap();
             file.write(&["\nFinal time: ".as_bytes(), time.to_string().as_bytes()].concat()).unwrap();
             break;
@@ -612,7 +688,7 @@ pub fn calibrate_time(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<
 
         println!("t: {} s: {}", time, hspd);
 
-        if _is_in_range_not_inclusive(100f64, hspd as f64, cali.max_speed as f64) {
+        if is_in_range_not_inclusive(100f64, hspd as f64, cali.max_speed as f64) {
             set_high_speed(handle, hspd as i32)?;
         }
         else {
@@ -624,63 +700,27 @@ pub fn calibrate_time(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<
     Ok(())
 }
 
-
-pub fn sin_run(handle: &mut DeviceHandle<GlobalContext>, dura: f64) -> rusb::Result<()> {
+pub fn run(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<()> {
     let file = &mut std::fs::File::options()
-                                            .read(true)
-                                            .append(true)
-                                            .open("./input.txt")
-                                            .expect("Couldn't find input file in directory");
+                                    .read(true)
+                                    .append(true)
+                                    .open("./input.txt")
+                                    .expect("Couldn't find input file in directory");
 
     let out_file = &mut std::fs::File::create("./out.txt").unwrap();
 
-    let cali: Calibration = _get_set_params_from_file(handle, file)?;
-
-    let mut hspd: i32 = get_high_speed(handle)?;
-    let start_hspd: f64 = get_high_speed(handle)? as f64;
-    
     set_pulse_position(handle, 0)?;
+    set_movement_type(handle, "INC")?;
 
-    let mut i: i32 = 1;
+    let cali: Calibration = _get_set_params_from_file(handle, file)?;
+    
     let t = std::time::SystemTime::now();
     loop {
-        move_one_cycle_position(handle, cali.distance, out_file, t)?;
+        move_one_cycle_position(handle, cali.distance, out_file, t, cali.dwell_time)?;
 
-        let error: f64 = t.elapsed().unwrap().as_secs_f64() - (cali.period * i as f64);
-
-        hspd = start_hspd as i32 + (error * cali.factor * 1000f64) as i32;
-        
-        println!("{} {}", error, hspd);
-
-        if _is_in_range_not_inclusive(100.0, hspd as f64, cali.max_speed as f64) == false {
-            panic!("Max/Min speed tripped at value {}", hspd);
-        }
-
-        if cali.period * i as f64 >= dura {
+        if t.elapsed().unwrap().as_secs_f64() >= cali.duration {
             break;
         }
-        
-        set_high_speed(handle, hspd as i32)?;
-        i += 1;
-    }
-
-    Ok(())
-}
-
-pub fn camel_run(handle: &mut DeviceHandle<GlobalContext>, dura: f64) -> rusb::Result<()> {
-    let cali = _get_set_params_from_file(handle, &mut std::fs::File::open("./input.txt").unwrap())?;
-    set_pulse_position(handle, 0)?;
-    let file = &mut std::fs::File::create("./camel.txt").unwrap();
-    let mut i = 1;
-    let time = std::time::SystemTime::now();
-    while time.elapsed().unwrap().as_secs_f64() < dura {
-        if time.elapsed().unwrap().as_secs_f64() >= cali.period * i as f64 {
-            move_one_cycle_position(handle, cali.distance, file, time)?;
-            i += 1;
-        }
     }
     Ok(())
 }
-
-
-
