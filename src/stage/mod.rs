@@ -77,9 +77,7 @@ pub fn _get_set_params_from_file(handle: &mut DeviceHandle<GlobalContext>, file:
     let whole_file_split_by_line_vec: Vec<_> = whole_file_string.split("\n").collect();
 
     for line in whole_file_split_by_line_vec {
-        if line.len() == 0 {
-            continue;
-        }
+        if line.len() == 0 {continue;}
 
         let split_line: Vec<_> = line.split_whitespace().collect();
 
@@ -613,12 +611,12 @@ pub fn move_one_cycle(handle: &mut DeviceHandle<GlobalContext>, distance: i32) -
     move_stage(handle, distance)?;
     wait_for_motor_idle(handle)?;
     move_stage(handle, -distance)?;
+    wait_for_motor_idle(handle)?;
     Ok(())
 }
 
 pub fn wait_for_motor_idle_position(handle: &mut DeviceHandle<GlobalContext>, file: &mut std::fs::File, time: std::time::SystemTime, dwell_time: f64) -> rusb::Result<()> {
     let mut i = 0;
-    std::thread::sleep(std::time::Duration::from_secs_f64(dwell_time));
     loop {
         if get_motor_status(handle)? == 0 {
             return Ok(())
@@ -627,7 +625,7 @@ pub fn wait_for_motor_idle_position(handle: &mut DeviceHandle<GlobalContext>, fi
         if i % 4 == 0 {
             file.write(&[time.elapsed().unwrap().as_secs_f64().to_string().as_bytes(),
                             "\t".as_bytes(), 
-                            get_encoder_position(handle)?.to_string().as_bytes(),
+                            get_pulse_position(handle)?.to_string().as_bytes(),
                             "\n".as_bytes()].concat()).unwrap();
         }
         i += 1;
@@ -637,8 +635,20 @@ pub fn wait_for_motor_idle_position(handle: &mut DeviceHandle<GlobalContext>, fi
 pub fn move_one_cycle_position(handle: &mut DeviceHandle<GlobalContext>, distance: i32, file: &mut std::fs::File, time: std::time::SystemTime, dwell_time: f64) -> rusb::Result<()> {
     move_stage(handle, distance)?;
     wait_for_motor_idle_position(handle, file, time, dwell_time)?;
+    std::thread::sleep(std::time::Duration::from_secs_f64(dwell_time));
+    
+    file.write(&[time.elapsed().unwrap().as_secs_f64().to_string().as_bytes(),
+    "\t".as_bytes(), 
+    get_pulse_position(handle)?.to_string().as_bytes(),
+    "\n".as_bytes()].concat()).unwrap();
+
     move_stage(handle, -distance)?;
     wait_for_motor_idle_position(handle, file, time, dwell_time)?;
+    
+    file.write(&[time.elapsed().unwrap().as_secs_f64().to_string().as_bytes(),
+    "\t".as_bytes(), 
+    get_pulse_position(handle)?.to_string().as_bytes(),
+    "\n".as_bytes()].concat()).unwrap();
     Ok(())
 }
 
@@ -700,6 +710,8 @@ pub fn calibrate_time(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<
     Ok(())
 }
 
+
+
 pub fn run(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<()> {
     let file = &mut std::fs::File::options()
                                     .read(true)
@@ -712,15 +724,22 @@ pub fn run(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<()> {
     set_pulse_position(handle, 0)?;
     set_movement_type(handle, "INC")?;
 
+    let start_hspd: i32 = get_high_speed(handle)?;
     let cali: Calibration = _get_set_params_from_file(handle, file)?;
     
     let t = std::time::SystemTime::now();
     loop {
-        move_one_cycle_position(handle, cali.distance, out_file, t, cali.dwell_time)?;
+        let time = get_average_time_over_cycles_position(handle, cali.distance, cali.cycles, out_file, t, cali.dwell_time)?;
 
-        if t.elapsed().unwrap().as_secs_f64() >= cali.duration {
-            break;
-        }
+        let error: f64 = time - cali.period;
+
+        let hspd = start_hspd + (error * cali.factor * 1000.0) as i32;
+
+        set_high_speed(handle, hspd)?;
+
+
+
+        if t.elapsed().unwrap().as_secs_f64() >= cali.duration {break;}
     }
     Ok(())
 }

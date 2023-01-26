@@ -1,6 +1,6 @@
 /target
 out.txt
-/src/plotting.py
 .cali_trash.txt
 time_vs_ideal.txt
 error.txt
+arduino

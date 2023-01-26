@@ -3,11 +3,12 @@ Cycles 3
 MaxSpeed 20000
 Factor 1
 Tolerance 0.9999
-Period 2
-HighSpeed 2114
+Period 4
+HighSpeed 2110
 LowSpeed 1
 AccelerationTime 1000
 AccelerationProfile trap
 DecelerationTime 1000
 IdleTime 1
-DwellTime 1000
+DwellTime 1
+Duration 60
