@@ -8,7 +8,6 @@ GTK, provides the gui binding
 ###
 To compile:
 On linux:
-Compiling "requires" cargo. You can compile with the Rust compiler (rustc) but this would have to be manual and somewhat difficult.
 To compile with cargo is easy, simply navigate to the overall directory and run: "cargo build --release". This will build and compile.
 It requires only libusb and gtk. 
 For libusb, on Debian "sudo apt-get install libusb-dev". On Arch "sudo pacman -S libusb"
