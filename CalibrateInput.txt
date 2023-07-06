@@ -1,0 +1,12 @@
+highspeed 4221
+lowspeed 1
+accelerationtime 1
+decelerationtime 1
+idletime 1
+amplitude 1965
+averagingcycles 3
+dwelltime 1
+factor 1
+maxspeed 10000
+period 3
+tolerance 0.997
