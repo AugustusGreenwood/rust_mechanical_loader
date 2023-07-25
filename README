@@ -20,3 +20,9 @@ I used the MSYS2 way and was able to get it to work. You'll need MSYS2 for libus
 For libusb, install MSYS2, then "pacman -S mingw-w64-x86_64-libusb". You may need to add MSYS2 to your path. The URL above gives a good way to do this.
 After everything, you should be able to run "cargo build --release" to be finished.
 ###
+
+
+
+
+
+
