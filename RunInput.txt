@@ -5,8 +5,8 @@ DecelerationTime 1
 IdleTime 1
 LoadStandbyCyles 4
 LoadCycles 1200
-Amplitude 1965
-Offset 0
+Amplitude 1180
+Offset 736
 Period 3
 StandbyDuration 82800
 DwellTime 1
