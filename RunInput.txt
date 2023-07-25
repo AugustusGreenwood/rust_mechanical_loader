@@ -8,7 +8,7 @@ LoadCycles 1200
 Amplitude 1965
 Offset 0
 Period 3
-StandbyDuration 80100
+StandbyDuration 82800
 DwellTime 1
 
 

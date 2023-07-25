@@ -239,7 +239,7 @@ pub fn run_prep(handle: &mut DeviceHandle<GlobalContext>) -> rusb::Result<RunPar
 
 // So, the most important thing is making sure that long term, the device stays on the correct period.
 // If the high speed isn't changed, then over many many cycles, what was a 0.01 difference on the 
-// first cycle, propogates to be a second on cycle 100 (which we reasonable reach). This is also why we 
+// first cycle, propogates to be a 10 seconds on cycle 1000 (which we reasonable reach). This is also why we 
 // can't adjust the speed based on a single cycle. We may be very accurate for a single cycle time, 
 // but the overall error may be too big. 
 // This is why we need the 'index' in '_adjust_high_speed' function. In a perfect world, the device 
@@ -270,7 +270,7 @@ pub fn run(handle: &mut DeviceHandle<GlobalContext>, params: &RunParameters, fil
         _adjust_speed(handle, load_cycle, 2.0, params.period, total_time.elapsed().as_secs_f64(), start_hspd)?;
     }
 
-    move_stage(handle, params.offset)?;
+    move_stage(handle, params.offset + 4913)?;
     wait_for_motor_idle(handle, None, None)?;
     std::thread::sleep(std::time::Duration::from_secs(1));
     return Ok(());
