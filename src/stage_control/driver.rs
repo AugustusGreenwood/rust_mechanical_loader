@@ -9,7 +9,7 @@ use rusb::{
 
 // Timeout used for all operations. You could change it, but it's not really
 // worth it. The timeout is never the limiting thing except when something 
-// else is wrong, so I would just leave it at 1 second.
+// else is wrong, so I would just leave it at 3 seconds.
 const TIMEOUT: Duration = Duration::from_secs(3);
 
 /*
