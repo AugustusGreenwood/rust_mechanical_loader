@@ -7,5 +7,5 @@ edition = "2021"
 
 [dependencies]
 rusb = "0.9.2"
-gtk = { version = "0.6.6", package = "gtk4", features = ["v4_6"] }
-gio-sys = "0.17.4"
+
+
