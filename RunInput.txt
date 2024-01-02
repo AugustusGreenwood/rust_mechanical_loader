@@ -1,17 +1,17 @@
-HighSpeed 4156
+HighSpeed 19782
 LowSpeed 1
-AccelerationTime 1
-DecelerationTime 1
+AccelerationTime 1000
+DecelerationTime 1000
 IdleTime 1
-LoadStandbyCyles 4
+LoadStandbyCyles 3
 LoadCycles 1200
-Amplitude 1965
-Offset 0
+Amplitude 8500
+Offset 800
 Period 3
-StandbyDuration 80100
-DwellTime 1
+StandbyDuration 10
+DwellTime 0.005
 
 
 # Calibration performed with: 
 # Averaging cyles: 3
-# Final period: 3.001605618333333
+# Final period: 3.0083865026666667
