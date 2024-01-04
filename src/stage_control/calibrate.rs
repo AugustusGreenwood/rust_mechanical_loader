@@ -1,5 +1,5 @@
-use crate::stage_control::control::{
-    get_cycle_time, get_high_speed, set_acceleration_time, set_deceleration_time,
+use crate::stage_control::commands::{
+    get_high_speed, move_cycle_get_time, set_acceleration_time, set_deceleration_time,
     set_encoder_position, set_high_speed, set_idle_time, set_low_speed, set_microstepping,
     set_movement_type, set_pulse_position, turn_motor_on, write_driver_settings,
 };
@@ -8,23 +8,23 @@ use rusb::{DeviceHandle, GlobalContext};
 
 use std::{
     fs::File,
-    io::{Read, Write},
+    io::{BufWriter, Read, Write},
     time::Instant,
 };
 
 #[derive(Debug)]
 pub struct CalibrateParameters {
-    high_speed: u64,
-    low_speed: u64,
-    acceleration_time: u64,
-    deceleration_time: u64,
-    idle_time: u64,
-    averaging_cycles: u64,
-    amplitude: i64,
+    high_speed: u32,
+    low_speed: u32,
+    acceleration_time: u32,
+    deceleration_time: u32,
+    idle_time: u32,
+    averaging_cycles: u32,
+    amplitude: i32,
     period: f64,
     dwell_time: f64,
     factor: f64,
-    max_speed: u64,
+    max_speed: u32,
     tolerance: f64,
 }
 
@@ -42,17 +42,17 @@ pub fn read_file_to_vector_of_lines(file_path: &str) -> std::io::Result<Vec<Stri
 
 fn _initialize_calibrate_parameters() -> CalibrateParameters {
     return CalibrateParameters {
-        high_speed: 0u64,
-        low_speed: 0u64,
-        acceleration_time: 0u64,
-        deceleration_time: 0u64,
-        idle_time: 0u64,
-        averaging_cycles: 0u64,
-        amplitude: 0i64,
+        high_speed: 0u32,
+        low_speed: 0u32,
+        acceleration_time: 0u32,
+        deceleration_time: 0u32,
+        idle_time: 0u32,
+        averaging_cycles: 0u32,
+        amplitude: 0i32,
         period: 0f64,
         dwell_time: 0f64,
         factor: 0f64,
-        max_speed: 0u64,
+        max_speed: 0u32,
         tolerance: 0f64,
     };
 }
@@ -67,25 +67,21 @@ fn _get_average_of_vector(vec: &Vec<f64>) -> f64 {
 }
 
 fn _adjust_speed(
-    handle: DeviceHandle<GlobalContext>,
-    index: u64,
+    handle: &DeviceHandle<GlobalContext>,
+    index: u32,
     factor: f64,
     period: f64,
     time: f64,
-    hspd: u64,
-) -> rusb::Result<u64> {
+    hspd: u32,
+) -> rusb::Result<u32> {
     let error = time - period * (index as f64);
-
-    let new_hspd = hspd as i64 + ((error * factor * 1000.0) as i64);
-
-    match set_high_speed(handle, new_hspd as u64) {
-        Ok(()) => return Ok(new_hspd as u64),
-        Err(e) => return Err(e),
-    };
+    let new_hspd: u32 = (hspd as i32 + (error * factor * 1000.0) as i32) as u32;
+    set_high_speed(handle, new_hspd)?;
+    return Ok(new_hspd);
 }
 
 pub fn set_calibrate_parameters_from_file(
-    handle: DeviceHandle<GlobalContext>,
+    handle: &DeviceHandle<GlobalContext>,
     file_path: &str,
 ) -> rusb::Result<CalibrateParameters> {
     let mut params: CalibrateParameters = _initialize_calibrate_parameters();
@@ -102,38 +98,23 @@ pub fn set_calibrate_parameters_from_file(
 
         match line[0].to_ascii_lowercase().as_str() {
             "highspeed" => {
-                match set_high_speed(handle, line[1].parse::<u64>().unwrap()) {
-                    Ok(()) => (),
-                    Err(e) => return Err(e),
-                };
+                let _ = set_high_speed(handle, line[1].parse::<u32>().unwrap())?;
                 params.high_speed = line[1].parse().unwrap();
             }
             "lowspeed" => {
-                match set_low_speed(handle, line[1].parse::<u64>().unwrap()) {
-                    Ok(()) => (),
-                    Err(e) => return Err(e),
-                };
+                let _ = set_low_speed(handle, line[1].parse::<u32>().unwrap())?;
                 params.low_speed = line[1].parse().unwrap();
             }
             "accelerationtime" => {
-                match set_acceleration_time(handle, line[1].parse::<u64>().unwrap()) {
-                    Ok(()) => (),
-                    Err(e) => return Err(e),
-                };
+                let _ = set_acceleration_time(handle, line[1].parse::<u32>().unwrap())?;
                 params.acceleration_time = line[1].parse().unwrap();
             }
             "decelerationtime" => {
-                match set_deceleration_time(handle, line[1].parse::<u64>().unwrap()) {
-                    Ok(()) => (),
-                    Err(e) => return Err(e),
-                };
+                let _ = set_deceleration_time(handle, line[1].parse::<u32>().unwrap())?;
                 params.deceleration_time = line[1].parse().unwrap();
             }
             "idletime" => {
-                match set_idle_time(handle, line[1].parse::<u64>().unwrap()) {
-                    Ok(()) => (),
-                    Err(e) => return Err(e),
-                };
+                let _ = set_idle_time(handle, line[1].parse::<u32>().unwrap())?;
                 params.idle_time = line[1].parse().unwrap();
             }
 
@@ -152,57 +133,35 @@ pub fn set_calibrate_parameters_from_file(
         }
     }
 
-    match write_driver_settings(handle) {
-        Ok(()) => (),
-        Err(e) => return Err(e),
-    };
-    match turn_motor_on(handle) {
-        Ok(()) => (),
-        Err(e) => return Err(e),
-    };
+    let _ = write_driver_settings(handle)?;
+    let _ = turn_motor_on(handle)?;
 
     return Ok(params);
 }
 
-pub fn calibrate(handle: DeviceHandle<GlobalContext>) -> rusb::Result<()> {
-    let params = match set_calibrate_parameters_from_file(handle, "./CalibrateInput.txt") {
-        Ok(p) => p,
-        Err(e) => return Err(e),
-    };
+pub fn calibrate(handle: &DeviceHandle<GlobalContext>) -> rusb::Result<()> {
+    let params = set_calibrate_parameters_from_file(handle, "./CalibrateInput.txt")?;
 
     let min_period: f64 = params.period * params.tolerance;
     let max_period: f64 = params.period * (2.0 - params.tolerance);
 
-    let mut hspd: u64 = match get_high_speed(handle) {
-        Ok(hspd) => hspd,
-        Err(e) => return Err(e),
-    };
+    let mut hspd: u32 = get_high_speed(handle)?;
     let mut time: f64 = 0.0;
     let mut times: Vec<f64> = vec![0.0; params.averaging_cycles as usize];
 
-    let pos_file = &mut File::create("./CalibrateOutput.txt").unwrap();
+    let pos_file = &mut Some(BufWriter::new(
+        File::create("./CalibrateOutput.txt").unwrap(),
+    ));
 
-    match set_microstepping(handle, 50) {
-        Ok(()) => (),
-        Err(e) => return Err(e),
-    };
-    match set_movement_type(handle, "inc") {
-        Ok(()) => (),
-        Err(e) => return Err(e),
-    };
-    match set_pulse_position(handle, 0) {
-        Ok(()) => (),
-        Err(e) => return Err(e),
-    };
-    match set_encoder_position(handle, 0) {
-        Ok(()) => (),
-        Err(e) => return Err(e),
-    };
+    let _ = set_microstepping(handle, 50)?;
+    let _ = set_movement_type(handle, "inc")?;
+    let _ = set_pulse_position(handle, 0)?;
+    let _ = set_encoder_position(handle, 0)?;
 
     while time < min_period || time > max_period {
-        let total_time = Instant::now();
+        let total_time = Some(Instant::now());
         for i in 0..params.averaging_cycles as usize {
-            times[i] = get_cycle_time(
+            times[i] = move_cycle_get_time(
                 handle,
                 params.amplitude,
                 pos_file,
