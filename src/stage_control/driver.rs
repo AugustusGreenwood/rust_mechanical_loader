@@ -25,8 +25,9 @@ pub fn write_to_control(handle: &DeviceHandle<GlobalContext>, value: u16) -> rus
 }
 
 pub fn saftey_read(handle: &DeviceHandle<GlobalContext>) -> rusb::Result<()> {
-    // This will almost always error (usually timout) and doesn't matter so all errors are ignored.
-    // We also don't care how many bytes were written
+    // This will almost always error (usually timout) and doesn't effect
+    // communication so all errors are ignored. We also don't care how many
+    // bytes were written. just full of apathy
     let _ = handle.read_bulk(0x82, &mut [0u8; 64], TIMEOUT);
     return Ok(());
 }

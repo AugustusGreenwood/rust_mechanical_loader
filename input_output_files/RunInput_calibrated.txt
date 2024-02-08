@@ -3,7 +3,7 @@ LowSpeed 1
 AccelerationTime 1
 DecelerationTime 1
 IdleTime 1
-LoadCycles 1200
+LoadCycles 
 Amplitude 8500
 Offset 5312
 Period 3
