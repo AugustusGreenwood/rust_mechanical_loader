@@ -40,5 +40,5 @@ pub fn cli() -> rusb::Result<()> {
     }
 
     close(&handle)?;
-    return Ok(());
+    Ok(())
 }
